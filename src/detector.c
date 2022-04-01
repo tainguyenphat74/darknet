@@ -1,4 +1,6 @@
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "darknet.h"
 #include "network.h"
 #include "region_layer.h"
@@ -175,7 +177,13 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         show_imgs = 2;
     args.show_imgs = show_imgs;
 
-    FILE *save_chart_to_txt; // test
+    // Tai Phat Nguyen - email: nguyentai2760@gmail.com
+    // Start - Create file to save chart information
+    FILE *draw_chart_fPtr;
+    char *draw_chart_path[50] = "draw_chart_info.txt";
+    char *draw_chart_info[100];
+    draw_chart_fPtr = fopen(draw_chart_path, "a");
+    // End
 
 #ifdef OPENCV
     // int num_threads = get_num_threads();
@@ -441,6 +449,13 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
                 avg_contrastive_acc = avg_contrastive_acc * 0.99 + cur_con_acc * 0.01;
             printf("  avg_contrastive_acc = %f \n", avg_contrastive_acc);
         }
+
+        // Tai Phat Nguyen - email: nguyentai2760@gmail.com
+        // Start - Save chart information to txt file
+        sprintf(draw_chart_info, "%s;%d;%f;%f;%d;%d;%f;%d;%s;%f;%d;%d;%Lf\n", windows_name, img_size, avg_loss, max_img_loss, iteration, net.max_batches, mean_average_precision, draw_precision, "mAP%", avg_contrastive_acc / 100, dont_show, mjpeg_port, avg_time);
+        fputs(draw_chart_info, draw_chart_fPtr);
+        // End
+
         draw_train_loss(windows_name, img, img_size, avg_loss, max_img_loss, iteration, net.max_batches, mean_average_precision, draw_precision, "mAP%", avg_contrastive_acc / 100, dont_show, mjpeg_port, avg_time);
 #endif // OPENCV
 
@@ -517,6 +532,262 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         net_map.n = 0;
         free_network(net_map);
     }
+}
+
+// Tai Phat Nguyen - email: nguyentai2760@gmail.com
+// Re-draw chart to show full information if max_batches too large
+void draw_chart(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear, int dont_show, int calc_map, float thresh, float iou_thresh, int mjpeg_port, int show_imgs, int benchmark_layers, char *chart_path)
+{
+    list *options = read_data_cfg(datacfg);
+    char *train_images = option_find_str(options, "train", "data/train.txt");
+    char *valid_images = option_find_str(options, "valid", train_images);
+    char *backup_directory = option_find_str(options, "backup", "/backup/");
+
+    network net_map;
+    if (calc_map)
+    {
+        FILE *valid_file = fopen(valid_images, "r");
+        if (!valid_file)
+        {
+            printf("\n Error: There is no %s file for mAP calculation!\n Don't use -map flag.\n Or set valid=%s in your %s file. \n", valid_images, train_images, datacfg);
+            getchar();
+            exit(-1);
+        }
+        else
+            fclose(valid_file);
+
+        cuda_set_device(gpus[0]);
+        printf(" Prepare additional network for mAP calculation...\n");
+        net_map = parse_network_cfg_custom(cfgfile, 1, 1);
+        net_map.benchmark_layers = benchmark_layers;
+        const int net_classes = net_map.layers[net_map.n - 1].classes;
+
+        int k; // free memory unnecessary arrays
+        for (k = 0; k < net_map.n - 1; ++k)
+            free_layer_custom(net_map.layers[k], 1);
+
+        char *name_list = option_find_str(options, "names", "data/names.list");
+        int names_size = 0;
+        char **names = get_labels_custom(name_list, &names_size);
+        if (net_classes != names_size)
+        {
+            printf("\n Error: in the file %s number of names %d that isn't equal to classes=%d in the file %s \n",
+                   name_list, names_size, net_classes, cfgfile);
+            if (net_classes > names_size)
+                getchar();
+        }
+        free_ptrs((void **)names, net_map.layers[net_map.n - 1].classes);
+    }
+
+    srand(time(0));
+    char *base = basecfg(cfgfile);
+    printf("%s\n", base);
+    float avg_loss = -1;
+    float avg_contrastive_acc = 0;
+    network *nets = (network *)xcalloc(ngpus, sizeof(network));
+
+    srand(time(0));
+    int seed = rand();
+    int k;
+    for (k = 0; k < ngpus; ++k)
+    {
+        srand(seed);
+#ifdef GPU
+        cuda_set_device(gpus[k]);
+#endif
+        nets[k] = parse_network_cfg(cfgfile);
+        nets[k].benchmark_layers = benchmark_layers;
+        if (weightfile)
+        {
+            load_weights(&nets[k], weightfile);
+        }
+        if (clear)
+        {
+            *nets[k].seen = 0;
+            *nets[k].cur_iteration = 0;
+        }
+        nets[k].learning_rate *= ngpus;
+    }
+    srand(time(0));
+    network net = nets[0];
+
+    const int actual_batch_size = net.batch * net.subdivisions;
+    if (actual_batch_size == 1)
+    {
+        printf("\n Error: You set incorrect value batch=1 for Training! You should set batch=64 subdivision=64 \n");
+        getchar();
+    }
+    else if (actual_batch_size < 8)
+    {
+        printf("\n Warning: You set batch=%d lower than 64! It is recommended to set batch=64 subdivision=64 \n", actual_batch_size);
+    }
+
+    int imgs = net.batch * net.subdivisions * ngpus;
+    printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
+    data train, buffer;
+
+    layer l = net.layers[net.n - 1];
+    for (k = 0; k < net.n; ++k)
+    {
+        layer lk = net.layers[k];
+        if (lk.type == YOLO || lk.type == GAUSSIAN_YOLO || lk.type == REGION)
+        {
+            l = lk;
+            printf(" Detection layer: %d - type = %d \n", k, l.type);
+        }
+    }
+
+    int classes = l.classes;
+
+    list *plist = get_paths(train_images);
+    int train_images_num = plist->size;
+    char **paths = (char **)list_to_array(plist);
+
+    const int init_w = net.w;
+    const int init_h = net.h;
+    const int init_b = net.batch;
+    int iter_save, iter_save_last, iter_map;
+    iter_save = get_current_iteration(net);
+    iter_save_last = get_current_iteration(net);
+    iter_map = get_current_iteration(net);
+    float mean_average_precision = -1;
+    float best_map = mean_average_precision;
+
+    load_args args = {0};
+    args.w = net.w;
+    args.h = net.h;
+    args.c = net.c;
+    args.paths = paths;
+    args.n = imgs;
+    args.m = plist->size;
+    args.classes = classes;
+    args.flip = net.flip;
+    args.jitter = l.jitter;
+    args.resize = l.resize;
+    args.num_boxes = l.max_boxes;
+    args.truth_size = l.truth_size;
+    net.num_boxes = args.num_boxes;
+    net.train_images_num = train_images_num;
+    args.d = &buffer;
+    args.type = DETECTION_DATA;
+    args.threads = 64; // 16 or 64
+
+    args.angle = net.angle;
+    args.gaussian_noise = net.gaussian_noise;
+    args.blur = net.blur;
+    args.mixup = net.mixup;
+    args.exposure = net.exposure;
+    args.saturation = net.saturation;
+    args.hue = net.hue;
+    args.letter_box = net.letter_box;
+    args.mosaic_bound = net.mosaic_bound;
+    args.contrastive = net.contrastive;
+    args.contrastive_jit_flip = net.contrastive_jit_flip;
+    args.contrastive_color = net.contrastive_color;
+    if (dont_show && show_imgs)
+        show_imgs = 2;
+    args.show_imgs = show_imgs;
+
+#ifdef OPENCV
+    // int num_threads = get_num_threads();
+    // if(num_threads > 2) args.threads = get_num_threads() - 2;
+    args.threads = 6 * ngpus; // 3 for - Amazon EC2 Tesla V100: p3.2xlarge (8 logical cores) - p3.16xlarge
+    // args.threads = 12 * ngpus;    // Ryzen 7 2700X (16 logical cores)
+    mat_cv *img = NULL;
+    float max_img_loss = net.max_chart_loss;
+    int number_of_lines = 100;
+    int img_size = 1000;
+    char windows_name[100];
+    sprintf(windows_name, "chart_%s.png", base);
+    img = draw_train_chart(windows_name, max_img_loss, net.max_batches, number_of_lines, img_size, dont_show, chart_path);
+
+    FILE *draw_chart_info_fp = fopen("draw_chart_info.txt", "r");
+    if (draw_chart_info_fp == NULL)
+    {
+        perror("Unable to open file!");
+        exit(1);
+    }
+
+    char chunk[200];
+    char f_windows_name[100];
+    int f_img_size;
+    float f_avg_loss;
+    float f_max_img_loss;
+    int f_iteration;
+    int f_max_batches;
+    float f_precision;
+    int f_draw_precision;
+    char *f_accuracy_name[100];
+    float f_contr_acc;
+    int f_dont_show;
+    int f_mjpeg_port;
+    double f_time_remaining;
+    int f_count = 0;
+
+    while (fgets(chunk, sizeof(chunk), draw_chart_info_fp) != NULL)
+    {
+        fputs(chunk, stdout);
+        char *token = strtok(chunk, ";");
+
+        while (token != NULL)
+        {
+            f_count++;
+            switch (f_count)
+            {
+            case 1:
+                sprintf(f_windows_name, "%s", token);
+                break;
+            case 2:
+                sprintf(f_img_size, "%d", atoi(token));
+                break;
+            case 3:
+                sprintf(f_avg_loss, "%f", atof(token));
+                break;
+            case 4:
+                sprintf(f_max_img_loss, "%f", atof(token));
+                break;
+            case 5:
+                sprintf(f_iteration, "%d", atoi(token));
+                break;
+            case 6:
+                sprintf(f_max_batches, "%d", atoi(token));
+                break;
+            case 7:
+                sprintf(f_precision, "%f", atof(token));
+                break;
+            case 8:
+                sprintf(f_draw_precision, "%d", atoi(token));
+                break;
+            case 9:
+                sprintf(f_accuracy_name, "%s", token);
+                break;
+            case 10:
+                sprintf(f_contr_acc, "%f", atof(token));
+                break;
+            case 11:
+                sprintf(f_dont_show, "%d", atoi(token));
+                break;
+            case 12:
+                sprintf(f_mjpeg_port, "%d", atoi(token));
+                break;
+            case 13:
+                sprintf(f_time_remaining, "%f", atof(token));
+                f_count = 0;
+                break;
+
+            default:
+                f_count = 0;
+                break;
+            }
+
+            token = strtok(NULL, ";");
+        }
+
+        draw_train_loss(f_windows_name, img, f_img_size, f_avg_loss, f_max_img_loss, f_iteration, f_max_batches, f_precision, f_draw_precision, "mAP%", f_contr_acc, f_dont_show, f_mjpeg_port, f_time_remaining);
+    }
+
+    fclose(draw_chart_info_fp);
+#endif // OPENCV
 }
 
 static int get_coco_image_id(char *filename)
@@ -2331,6 +2602,8 @@ void run_detector(int argc, char **argv)
         test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, outfile, letter_box, benchmark_layers);
     else if (0 == strcmp(argv[2], "train"))
         train_detector(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map, thresh, iou_thresh, mjpeg_port, show_imgs, benchmark_layers, chart_path);
+    else if (0 == strcmp(argv[2], "draw"))
+        draw_chart(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map, thresh, iou_thresh, mjpeg_port, show_imgs, benchmark_layers, chart_path);
     else if (0 == strcmp(argv[2], "valid"))
         validate_detector(datacfg, cfg, weights, outfile);
     else if (0 == strcmp(argv[2], "recall"))
