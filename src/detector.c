@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,6 +184,10 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     char draw_chart_path[] = "/mydrive/test_re-draw-chart_function/draw_chart_info.txt";
     char draw_chart_info[100];
     draw_chart_fPtr = fopen(draw_chart_path, "a");
+    if (access(draw_chart_path, F_OK) == 0)
+    {
+        fputs("\n\n", draw_chart_fPtr);
+    }
     // End
 
 #ifdef OPENCV
