@@ -181,7 +181,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     // Tai Phat Nguyen - email: nguyentai2760@gmail.com
     // Start - Create file to save chart information
     FILE *draw_chart_fPtr;
-    char draw_chart_path[] = "/mydrive/test_re-draw-chart_function/draw_chart_info.txt";
+    char draw_chart_path[100];
+    sprintf(draw_chart_path, "%s/%s", backup_directory, "draw_chart_info.txt");
     char draw_chart_info[100];
     draw_chart_fPtr = fopen(draw_chart_path, "a");
     if (access(draw_chart_path, F_OK) == 0)
