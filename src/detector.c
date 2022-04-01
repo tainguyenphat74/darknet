@@ -181,14 +181,11 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     // Tai Phat Nguyen - email: nguyentai2760@gmail.com
     // Start - Create file to save chart information
     FILE *draw_chart_fPtr;
+    char draw_chart_info[100]; // contain chart information
     char draw_chart_path[100];
     sprintf(draw_chart_path, "%s/%s", backup_directory, "draw_chart_info.txt");
-    char draw_chart_info[100];
     draw_chart_fPtr = fopen(draw_chart_path, "a");
-    if (access(draw_chart_path, F_OK) == 0)
-    {
-        fputs("\n\n", draw_chart_fPtr);
-    }
+    fputs("\nNew training...\n", draw_chart_fPtr); // set a separator when a new train/re-train command is executed
     // End
 
 #ifdef OPENCV
@@ -707,7 +704,8 @@ void draw_chart(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int n
     sprintf(windows_name, "chart_%s.png", base);
     img = draw_train_chart(windows_name, max_img_loss, net.max_batches, number_of_lines, img_size, dont_show, chart_path);
 
-    char draw_chart_path[] = "/mydrive/test_re-draw-chart_function/draw_chart_info.txt";
+    char draw_chart_path[100];
+    sprintf(draw_chart_path, "%s/%s", backup_directory, "draw_chart_info.txt");
     FILE *draw_chart_info_fp = fopen(draw_chart_path, "r");
     if (draw_chart_info_fp == NULL)
     {
