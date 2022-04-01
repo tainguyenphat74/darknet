@@ -180,8 +180,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     // Tai Phat Nguyen - email: nguyentai2760@gmail.com
     // Start - Create file to save chart information
     FILE *draw_chart_fPtr;
-    char *draw_chart_path[50] = "draw_chart_info.txt";
-    char *draw_chart_info[100];
+    char draw_chart_path[100] = "/mydrive/test_re-draw-chart_function/draw_chart_info.txt";
+    char draw_chart_info[100];
     draw_chart_fPtr = fopen(draw_chart_path, "a");
     // End
 
@@ -452,7 +452,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
 
         // Tai Phat Nguyen - email: nguyentai2760@gmail.com
         // Start - Save chart information to txt file
-        sprintf(draw_chart_info, "%s;%d;%f;%f;%d;%d;%f;%d;%s;%f;%d;%d;%Lf\n", windows_name, img_size, avg_loss, max_img_loss, iteration, net.max_batches, mean_average_precision, draw_precision, "mAP%", avg_contrastive_acc / 100, dont_show, mjpeg_port, avg_time);
+        sprintf(draw_chart_info, "%f;%f;%d;%f;%d;%f;%d;%d;%f\n", avg_loss, max_img_loss, iteration, mean_average_precision, draw_precision, avg_contrastive_acc / 100, dont_show, mjpeg_port, avg_time);
         fputs(draw_chart_info, draw_chart_fPtr);
         // End
 
@@ -701,7 +701,7 @@ void draw_chart(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int n
     sprintf(windows_name, "chart_%s.png", base);
     img = draw_train_chart(windows_name, max_img_loss, net.max_batches, number_of_lines, img_size, dont_show, chart_path);
 
-    FILE *draw_chart_info_fp = fopen("draw_chart_info.txt", "r");
+    FILE *draw_chart_info_fp = fopen(draw_chart_path, "r");
     if (draw_chart_info_fp == NULL)
     {
         perror("Unable to open file!");
@@ -735,43 +735,31 @@ void draw_chart(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int n
             switch (f_count)
             {
             case 1:
-                sprintf(f_windows_name, "%s", token);
+                f_avg_loss = atof(token);
                 break;
             case 2:
-                sprintf(f_img_size, "%d", atoi(token));
+                f_max_img_loss = atof(token);
                 break;
             case 3:
-                sprintf(f_avg_loss, "%f", atof(token));
+                f_iteration = atoi(token);
                 break;
             case 4:
-                sprintf(f_max_img_loss, "%f", atof(token));
+                f_precision = atof(token);
                 break;
             case 5:
-                sprintf(f_iteration, "%d", atoi(token));
+                f_draw_precision = atoi(token);
                 break;
             case 6:
-                sprintf(f_max_batches, "%d", atoi(token));
+                f_contr_acc = atof(token);
                 break;
             case 7:
-                sprintf(f_precision, "%f", atof(token));
+                f_dont_show = atoi(token);
                 break;
             case 8:
-                sprintf(f_draw_precision, "%d", atoi(token));
+                f_mjpeg_port = atoi(token);
                 break;
             case 9:
-                sprintf(f_accuracy_name, "%s", token);
-                break;
-            case 10:
-                sprintf(f_contr_acc, "%f", atof(token));
-                break;
-            case 11:
-                sprintf(f_dont_show, "%d", atoi(token));
-                break;
-            case 12:
-                sprintf(f_mjpeg_port, "%d", atoi(token));
-                break;
-            case 13:
-                sprintf(f_time_remaining, "%f", atof(token));
+                f_time_remaining = atof(token);
                 f_count = 0;
                 break;
 
@@ -783,7 +771,7 @@ void draw_chart(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int n
             token = strtok(NULL, ";");
         }
 
-        draw_train_loss(f_windows_name, img, f_img_size, f_avg_loss, f_max_img_loss, f_iteration, f_max_batches, f_precision, f_draw_precision, "mAP%", f_contr_acc, f_dont_show, f_mjpeg_port, f_time_remaining);
+        draw_train_loss(windows_name, img, img_size, f_avg_loss, f_max_img_loss, f_iteration, net.max_batches, f_precision, f_draw_precision, "mAP%", f_contr_acc, f_dont_show, f_mjpeg_port, f_time_remaining);
     }
 
     fclose(draw_chart_info_fp);
